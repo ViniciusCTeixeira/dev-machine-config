@@ -62,6 +62,56 @@ case "$PKG" in
     ;;
 esac
 
+# =========================
+# Remoções solicitadas
+# =========================
+
+# 1) LibreOffice
+echo "🧹 Removendo LibreOffice..."
+case "$PKG" in
+  apt)
+    run_sudo apt remove -y --purge libreoffice* || true
+    run_sudo apt autoremove -y || true
+    ;;
+  dnf)
+    run_sudo dnf -y remove libreoffice\* || true
+    ;;
+  pacman)
+    run_sudo pacman -Rns --noconfirm libreoffice-fresh libreoffice-still || true
+    ;;
+esac
+
+# 2) Weather, Calendar, Contacts, Geary, Seahorse (pacotes e flatpaks)
+echo "🧹 Removendo Weather, Calendar, Contacts, Geary e Seahorse (pacotes e flatpaks)..."
+
+# Tentar remover versões Flatpak (ignora erros se não instaladas)
+if command_exists flatpak; then
+  run_sudo flatpak uninstall -y --noninteractive --delete-data \
+    org.gnome.Weather \
+    org.gnome.Calendar \
+    org.gnome.Contacts \
+    org.gnome.Geary \
+    org.gnome.seahorse \
+    org.gnome.Seahorse || true
+fi
+
+# Remover pacotes nativos
+case "$PKG" in
+  apt)
+    run_sudo apt remove -y --purge \
+      gnome-weather gnome-calendar gnome-contacts geary seahorse || true
+    run_sudo apt autoremove -y || true
+    ;;
+  dnf)
+    run_sudo dnf -y remove \
+      gnome-weather gnome-calendar gnome-contacts geary seahorse || true
+    ;;
+  pacman)
+    run_sudo pacman -Rns --noconfirm \
+      gnome-weather gnome-calendar gnome-contacts geary seahorse || true
+    ;;
+esac
+
 # pipx
 if ! command_exists pipx; then
   python3 -m pip install --user pipx >/dev/null 2>&1 || true
@@ -115,13 +165,13 @@ DEV_APPS=(
   "com.jetbrains.DataGrip"           # DataGrip
   "com.jetbrains.PhpStorm"           # PhpStorm
   "com.jetbrains.PyCharm-Community"  # PyCharm
-  "com.usebottles.bottles"			 # Bottles
+  "com.usebottles.bottles"           # Bottles
   "com.discordapp.Discord"           # Discord
-  "org.mozilla.firefox"				 # Firefox Developer
-  "org.remmina.Remmina"				 # Remmina
-  "org.onlyoffice.desktopeditors"	 # ONLYOFFICE
+  "org.mozilla.firefox"              # Firefox Developer
+  "org.remmina.Remmina"              # Remmina
+  "org.onlyoffice.desktopeditors"    # ONLYOFFICE (substitui LibreOffice)
   "org.qbittorrent.qBittorrent"      # qBittorrent
-  "io.github.shiftey.Desktop"        # GitHub 
+  "io.github.shiftey.Desktop"        # GitHub Desktop
   "org.filezillaproject.Filezilla"   # FileZilla 
 )
 
@@ -131,15 +181,13 @@ LEISURE_APPS=(
   "com.valvesoftware.Steam"          # Steam
   "net.lutris.Lutris"                # Lutris
   "com.github.Matoking.protontricks" # Protontricks
-  "com.vysp3r.ProtonPlus"            # ProtonPlus (gerenciador Proton/GE)
-  "com.heroicgameslauncher.hgl"      # Heroic Games Launcher (Epic/GOG)
+  "com.vysp3r.ProtonPlus"            # ProtonPlus
+  "com.heroicgameslauncher.hgl"      # Heroic Games Launcher
   "com.obsproject.Studio"            # OBS
   "org.videolan.VLC"                 # VLC
   "com.calibre_ebook.calibre"        # Calibre
-
 )
 
-# Instalar Flatpak
 install_flatpak_apps() {
   local -n arr=$1
   for app in "${arr[@]}"; do
@@ -152,7 +200,6 @@ install_flatpak_apps() {
   done
 }
 
-# Chrome via repositório oficial (APT/DNF). Arch via AUR.
 install_chrome_repo() {
   if [ "$PKG" = "apt" ]; then
     wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | run_sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
@@ -168,7 +215,6 @@ install_chrome_repo() {
   fi
 }
 
-# Função para instalar Hydra Launcher
 install_hydra_launcher() {
   echo "⬇️  Instalando Hydra Launcher..."
   TMP_DIR=$(mktemp -d)
@@ -176,30 +222,25 @@ install_hydra_launcher() {
 
   case "$PKG" in
     apt)
-      # Debian/Ubuntu - .deb
       wget -q https://github.com/hydralauncher/hydra/releases/download/v3.6.3/hydralauncher_3.6.3_amd64.deb -O hydra-launcher.deb
       run_sudo apt install -y ./hydra-launcher.deb
       ;;
     dnf)
-      # Fedora - .rpm
       wget -q https://github.com/hydralauncher/hydra/releases/download/v3.6.3/hydralauncher-3.6.3.x86_64.rpm -O hydra-launcher.rpm
       run_sudo dnf install -y ./hydra-launcher.rpm
       ;;
     pacman)
-      # Arch - usa AppImage
       wget -q https://github.com/hydralauncher/hydra/releases/download/v3.6.3/hydralauncher-3.6.3.AppImage -O hydra-launcher.AppImage
       chmod +x hydra-launcher.AppImage
       run_sudo mv hydra-launcher.AppImage /usr/local/bin/hydra-launcher
       ;;
   esac
 
-  cd -
+  cd - >/dev/null
   rm -rf "$TMP_DIR"
   echo "✅ Hydra Launcher instalado!"
 }
 
-
-# Extras terminal
 install_cli_extras() {
   if ! command_exists zsh; then
     case "$PKG" in
@@ -227,7 +268,6 @@ install_cli_extras() {
   fi
 }
 
-# Execução
 echo "🚀 Iniciando instalação..."
 install_cli_extras
 
@@ -248,4 +288,4 @@ if [ "$INSTALL_DOCKER" -eq 1 ]; then
   install_docker
 fi
 
-echo "✅ Instalação concluída!"
+echo "✅ Instalação concluída! Apps GNOME (Weather/Calendar/Contacts/Geary/Seahorse) e LibreOffice removidos."
