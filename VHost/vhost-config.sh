@@ -4,7 +4,7 @@ set -euo pipefail
 ### Config padrão
 TEXTDOMAIN=virtualhost
 
-action="${1:-}"    # create | delete
+action="${1:-}"    # create | delete | -h/--h/--help
 domain="${2:-}"    # ex: meusite.local
 rootDir="${3:-}"   # ex: /var/www/meusite.local  (se vazio, usa /var/www/<domain>)
 
@@ -13,6 +13,52 @@ sitesEnable='/etc/apache2/sites-enabled/'
 sitesAvailable='/etc/apache2/sites-available/'
 userDir='/var/www/'
 owner="${SUDO_USER:-${USER:-}}"
+
+print_usage() {
+  cat <<'EOF'
+Uso:
+  sudo ./vhost-config.sh create <dominio> [docroot] [flags]
+  sudo ./vhost-config.sh delete <dominio> [docroot]
+  sudo ./vhost-config.sh --h | -h | --help
+
+Parâmetros:
+  <dominio>  Domínio do vhost (ex.: meusite.local)
+  [docroot]  Caminho do DocumentRoot. Se omitido, usa /var/www/<dominio>
+             Se fornecer caminho relativo, ele será prefixado por /var/www/
+
+Flags (opcionais):
+  --signed              Tenta emitir certificado Let's Encrypt (webroot). Padrão: autoassinado
+  --ssl-redirect        Adiciona redirecionamento 80 -> 443
+  --php[=VERSAO]        Força backend PHP-FPM por versão (socket)
+                        Aceita tokens: php56/5.6/56, php70/7.0/70, ..., php84/8.4/84
+                        Exemplos: --php=8.2  |  --php php83
+  -h, --h, --help       Mostra esta ajuda e sai
+
+Variáveis de ambiente:
+  EMAIL                 E-mail do administrador/Let's Encrypt (padrão: webmaster@localhost)
+
+Exemplos:
+  # Criar vhost com autoassinado (padrão), docroot padrão /var/www/meusite.local
+  sudo ./vhost-config.sh create meusite.local
+
+  # Criar vhost forçando PHP 8.2 via socket e com redirect 80->443
+  sudo ./vhost-config.sh create meusite.local /var/www/meusite --php=8.2 --ssl-redirect
+
+  # Criar vhost tentando Let's Encrypt (cai para autoassinado se falhar)
+  sudo ./vhost-config.sh create meusite.local --signed
+
+  # Remover vhost (pergunta se deseja excluir o diretório)
+  sudo ./vhost-config.sh delete meusite.local
+EOF
+}
+
+# ajuda como 1º argumento
+case "${action:-}" in
+  -h|--h|--help|help)
+    print_usage
+    exit 0
+    ;;
+esac
 
 # Consome os 3 posicionais; flags começam a partir daqui
 shift 3 || true
@@ -24,10 +70,11 @@ php_token=""            # ex: php74, php83, 8.2, 82
 
 while (( "$#" )); do
   case "${1:-}" in
-    --signed) force_selfsigned=false; shift;;         # tenta LE
-    --ssl-redirect) no_redirect=false; shift;;        # adiciona Redirect 80->443
+    --signed) force_selfsigned=false; shift;;
+    --ssl-redirect) no_redirect=false; shift;;
     --php=*) php_token="${1#*=}"; shift;;
     --php)   php_token="${2:-}"; shift 2;;
+    -h|--h|--help) print_usage; exit 0;;
     *) shift;;
   esac
 done
@@ -80,20 +127,17 @@ map_php_token(){
   esac
 }
 
-# Descobre o backend do PHP-FPM:
-# - Se versão foi informada: usa /run/php/php<ver>-fpm.sock (erro se não existir; fallback TCP 127.0.0.1:9000 se quiser trocar o comportamento)
-# - Se não: pega o socket mais novo encontrado; senão TCP 127.0.0.1:9000
+# Descobre o backend do PHP-FPM (socket preferencial, senão TCP 127.0.0.1:9000)
 detect_php_backend(){
   local ver_sock="" sock="" tcp="127.0.0.1:9000"
   if [[ -n "${php_token}" ]]; then
     ver_sock="$(map_php_token "${php_token}")"
     [[ -z "${ver_sock}" ]] && die "Versão PHP inválida em --php=${php_token}"
     sock="/run/php/php${ver_sock}-fpm.sock"
-    [[ -S "${sock}" ]] || die "Socket do PHP-FPM não encontrado: ${sock} (certifique-se que o php${ver_sock}-fpm está instalado e em execução)"
+    [[ -S "${sock}" ]] || die "Socket do PHP-FPM não encontrado: ${sock} (garanta que php${ver_sock}-fpm está instalado/rodando)"
     echo "unix:${sock}"
     return 0
   fi
-  # sem versão: tenta descobrir automaticamente
   local found
   found="$(ls -1 /run/php/php*-fpm.sock 2>/dev/null | sort -V | tail -n1 || true)"
   if [[ -n "${found}" && -S "${found}" ]]; then
@@ -103,49 +147,15 @@ detect_php_backend(){
   fi
 }
 
-# gera autoassinado em /etc/ssl/<domain>/{fullchain.pem,privkey.pem}
-generate_self_signed(){
-  local certdir="/etc/ssl/${domain}"
-  mkdir -p "${certdir}"
-  local key="${certdir}/privkey.pem"
-  local crt="${certdir}/cert.pem"
-  local full="${certdir}/fullchain.pem"
-  openssl req -x509 -nodes -newkey rsa:2048 -days 397 \
-    -keyout "${key}" -out "${crt}" \
-    -subj "/CN=${domain}" >/dev/null 2>&1
-  cp -f "${crt}" "${full}"
-  echo "${full}|${key}"
-}
-
-# tenta obter LE via webroot; retorna "full|key" ou string vazia se falhar
-obtain_letsencrypt(){
-  local webroot="${1}"
-  if ! have_certbot; then
-    echo ""
-    return 0
-  fi
-  if certbot certonly --webroot -w "${webroot}" -d "${domain}" \
-      -m "${email}" --agree-tos --no-eff-email --non-interactive >/dev/null 2>&1; then
-    local live="${letsencrypt_live}/${domain}"
-    local full="${live}/fullchain.pem"
-    local key="${live}/privkey.pem"
-    if [[ -f "${full}" && -f "${key}" ]]; then
-      echo "${full}|${key}"
-      return 0
-    fi
-  fi
-  echo ""
-}
-
 # validações iniciais
 [ "$(id -u)" -eq 0 ] || die "Use sudo/root para executar."
-[[ "${action}" =~ ^(create|delete)$ ]] || die "Ação inválida. Use: create ou delete."
+[[ "${action}" =~ ^(create|delete)$ ]] || { print_usage; die "Ação inválida. Use: create ou delete."; }
 
 while [[ -z "${domain}" ]]; do
   read -r -p "Informe o domínio (ex: meusite.local): " domain
 done
 
-# Aceita domínios com pontos e hífens; para ambientes internos, também passará
+# Aceita domínios com pontos e hífens
 if ! [[ "${domain}" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$ ]]; then
   die "Domínio inválido: ${domain}"
 fi
@@ -180,7 +190,7 @@ if [[ "${action}" == "create" ]]; then
   ensure_httpd_mods
 
   # descobre backend do PHP-FPM
-  php_backend="$(detect_php_backend)"  # formato: unix:/run/php/php8.2-fpm.sock  OU  tcp:127.0.0.1:9000
+  php_backend="$(detect_php_backend)"  # unix:/run/php/php8.2-fpm.sock  OU  tcp:127.0.0.1:9000
 
   # bloco FilesMatch para PHP-FPM
   php_handler_block=""
