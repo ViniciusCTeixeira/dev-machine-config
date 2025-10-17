@@ -1,1 +1,1 @@
-sudo cp /path/to/vhost-config.sh /usr/local/bin/vhost-config
+sudo cp ./vhost-config.sh /usr/local/bin/vhost-config

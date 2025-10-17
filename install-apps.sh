@@ -126,9 +126,10 @@ install_flatpak_and_flathub() {
       dnf) run_sudo dnf -y install flatpak ;;
       pacman) run_sudo pacman -S --noconfirm --needed flatpak ;;
     esac
-  fi
-  if ! flatpak remote-list | grep -qi flathub; then
-    run_sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+    if ! flatpak remote-list | grep -qi flathub; then
+      run_sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+    fi
   fi
 }
 install_flatpak_and_flathub
@@ -164,7 +165,7 @@ DEV_APPS=(
   "com.getpostman.Postman"           # Postman
   "com.jetbrains.DataGrip"           # DataGrip
   "com.jetbrains.PhpStorm"           # PhpStorm
-  "com.jetbrains.PyCharm-Community"  # PyCharm
+  "com.jetbrains.PyCharm-Professional"  # PyCharm
   "com.usebottles.bottles"           # Bottles
   "com.discordapp.Discord"           # Discord
   "org.mozilla.firefox"              # Firefox Developer
